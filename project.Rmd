@@ -1,0 +1,113 @@
+## **Practical Machine Learning Project**
+
+### The goal of this project is to build a machine learning algorithm to predict activity quality from different activity monitors.
+
+I will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The data can be found on the website: http://groupware.les.inf.puc-rio.br/har
+
+This analysis requires several libraries to be loaded.
+```{r message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(rattle)
+```
+
+# **Preparing Data**
+First step is to set the working directory, read the csv files into the directory and change empty values into "NA".  Setting the seed allows for reproducibility. 
+```{r}
+set.seed(12345)
+setwd("C:/Users/Lisa/Desktop/data science/practical machine learning")
+train_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+pml_train <- read.csv(url(train_url), na.strings=c("NA","#DIV/0!",""))
+test_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+pml_test <- read.csv(url(test_url), na.strings=c("NA","#DIV/0!",""))
+```
+Next, the training set (pml_train) gets partitioned into 60% training and 40% testing datasets
+```{r}
+intrain <- createDataPartition(y=pml_train$classe, p=0.6, list=FALSE)
+my_training <- pml_train[intrain,]
+my_testing <- pml_train[-intrain,]
+```
+
+# **Cleaning Data**
+The data sets are cleaned by removing variables with nearly zero variance, variables that are almost always NA, and variables that aren't necessary for prediction, according to the my_training data set.  The same variables are removed from the my_testing dataset
+```{r}
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(my_training)
+my_training <- my_training[, -nzv]
+my_testing <- my_testing[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(my_training, function(x) mean(is.na(x))) > 0.95
+my_training <- my_training[, mostlyNA==F]
+my_testing <- my_testing[, mostlyNA==F]
+
+# remove variables that aren't important for prediction, columns 1-5
+my_training <- my_training[, -(1:5)]
+my_testing <- my_testing[, -(1:5)]
+```
+
+# **Building Model**
+I use the random forest model to fit the my_training dataset. A 3-fold cross validation model is used to select the most important variables
+```{r}
+# use the "train" function to perform a 3-fold CV to select the variables
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+
+# fit model on my_training
+fit <- train(classe ~ ., data=my_training, method="rf", trControl=fitControl)
+
+#print final model to see which variables it chose
+fit$finalModel
+```
+The report shows that 500 trees were used and the model tried 27 variables at each split
+
+# **Evaluating and Selecting Model**
+I use the fitted model to predict the "classe" label in my_testing dataset. The confusion matrix is used to compare predicted vs. the actual labels
+```{r}
+# use model to predict classe in my_testing validation set
+preds <- predict(fit, newdata=my_testing)
+
+# show confusion matrix to get estimate of out-of-sample error
+confusionMatrix(my_testing$classe, preds)
+```
+The accuracy for predicting the "classe" label is 99.7%. Therefore the predicted accuracy for the out of sample variance is only 0.3%, which makes it a great model to use
+
+# **Re-training the Selected Model**
+Before predicting on the original testing dataset (pml_test) I have to model on the full training dataset (pml_train). Preprocessing and model analysis is repeated on these datasets.
+```{r}
+#remove variables that are nearly zero variance
+nzv <- nearZeroVar(pml_train)
+pml_train <- pml_train[, -nzv]
+pml_test <- pml_test[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(pml_train, function(x) mean(is.na(x))) > 0.95
+pml_train <- pml_train[, mostlyNA==F]
+pml_test <- pml_test[, mostlyNA==F]
+
+#remove variables that don't make sense for prediction, columns 1-5
+pml_train <- pml_train[, -(1:5)]
+pml_test <- pml_test[, -(1:5)]
+
+# re-fit model using full training set (pml_train)
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=pml_train, method="rf", trControl=fitControl)
+```
+
+# **Predicting on the original testing dataset**
+The model that fit on pml_train is used to predict the "classe" label on pml_test. Those predictions are written to a file for submission
+```{r}
+# predict on test set and convert predictors to a character vector
+preds <- predict(fit, newdata=pml_test)
+preds <- as.character(preds)
+preds
+
+# the predictions are written to files for submission
+pml_write_files <- function(x) {
+    n <- length(x)
+    for(i in 1:n) {
+        filename <- paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+    }
+}
+pml_write_files(preds)
+```
